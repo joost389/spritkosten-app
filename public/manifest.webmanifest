@@ -1,9 +1,0 @@
-{
-  "name": "Spritkosten-Rechner",
-  "short_name": "Spritkosten",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#f3f6f4",
-  "theme_color": "#142b24",
-  "icons": [{"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}]
-}
