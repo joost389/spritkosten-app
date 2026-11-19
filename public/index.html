@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#142b24">
+  <meta name="description" content="Fahrtkosten und aktuelle Spritpreise in deiner Nähe berechnen.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <title>Spritkosten-Rechner</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#17231f;background:#f3f6f4}
+    *{box-sizing:border-box}body{margin:0}header{background:#142b24;color:white;padding:22px max(18px,calc((100% - 900px)/2))}
+    header h1{margin:0;font-size:1.5rem}header p{margin:6px 0 0;color:#d3e3da}
+    main{max-width:900px;margin:22px auto;padding:0 14px 50px}
+    section{background:white;border:1px solid #dce5df;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 3px 14px #142b240a}
+    h2{font-size:1.08rem;margin:0 0 14px}label{display:block;font-size:.9rem;font-weight:650;margin:10px 0 5px}
+    input,select,button{font:inherit;width:100%;padding:12px;border:1px solid #cbd7cf;border-radius:10px;background:white;color:#17231f}
+    button{background:#176b4a;color:white;border:0;font-weight:700;cursor:pointer;margin-top:14px}
+    button:disabled{opacity:.55;cursor:wait}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .muted{color:#65746b;font-size:.88rem}.result{font-size:1.8rem;font-weight:800;color:#176b4a}
+    .row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #edf1ee}
+    .row:last-child{border:0}.price{font-weight:750;white-space:nowrap}
+    .error{color:#a12a2a}.pill{display:inline-block;background:#e8f4ed;color:#176b4a;border-radius:30px;padding:4px 9px;font-size:.78rem}
+    footer{font-size:.78rem;color:#68766e;text-align:center;padding:12px}
+    @media(max-width:560px){.grid{grid-template-columns:1fr}main{margin-top:12px}section{padding:15px}}
+  </style>
+</head>
+<body>
+<header><h1>⛽ Spritkosten-Rechner</h1><p>Strecke, Verbrauch und aktuelle Spritpreise – ganz ohne GPS-Standortzugriff</p></header>
+<main>
+  <section>
+    <h2>1. Strecke</h2>
+    <label for="start">Start</label><input id="start" placeholder="z. B. Oldenburg">
+    <label for="destination">Ziel</label><input id="destination" placeholder="z. B. Bremen">
+    <button id="routeBtn">Strecke berechnen</button>
+    <p id="routeInfo" class="muted">Die Route wird über OpenStreetMap / OSRM ermittelt.</p>
+  </section>
+  <section>
+    <h2>2. Fahrzeug</h2>
+    <div class="grid">
+      <div><label for="vehicle">Profil</label><select id="vehicle">
+        <option value="6.5">Kompaktwagen · 6,5 l/100 km</option>
+        <option value="7.5">Mittelklasse · 7,5 l/100 km</option>
+        <option value="9">SUV · 9,0 l/100 km</option>
+        <option value="5">Sparsam · 5,0 l/100 km</option>
+        <option value="custom">Eigener Verbrauch</option>
+      </select></div>
+      <div><label for="consumption">Verbrauch (l/100 km)</label><input id="consumption" type="number" min="0.1" step="0.1" value="6.5"></div>
+    </div>
+    <div class="grid">
+      <div><label for="fuel">Kraftstoff</label><select id="fuel">
+        <option value="e10">Super E10</option><option value="e5">Super E5</option><option value="diesel">Diesel</option>
+      </select></div>
+      <div><label for="radius">Preis-Umkreis</label><select id="radius">
+        <option value="5">5 km</option><option value="10" selected>10 km</option><option value="15">15 km</option><option value="25">25 km</option>
+      </select></div>
+    </div>
+  </section>
+  <section>
+    <h2>3. Aktuelle Spritpreise</h2>
+    <label for="priceLocation">Tankpreise suchen am</label>
+    <select id="priceLocation">
+      <option value="destination">Zielort</option>
+      <option value="start">Startort</option>
+      <option value="route">Entlang der Route</option>
+    </select>
+    <p class="muted">Die Suche verwendet nur die oben eingegebenen Adressen und die berechnete Route. Es wird kein Geräte-Standort abgefragt.</p>
+    <button id="priceBtn">Tankpreise suchen</button>
+    <p id="priceStatus" class="muted">Bitte zuerst Start und Ziel eingeben und die Strecke berechnen.</p>
+    <div id="average"></div><div id="stations"></div>
+  </section>
+  <section>
+    <h2>4. Fahrtkosten</h2>
+    <div class="grid">
+      <div><label for="distance">Strecke (km)</label><input id="distance" type="number" min="0" step="0.1" placeholder="Wird aus Route übernommen"></div>
+      <div><label for="manualPrice">Preis (€/Liter)</label><input id="manualPrice" type="number" min="0" step="0.001" placeholder="Wird aus Durchschnitt übernommen"></div>
+    </div>
+    <button id="calcBtn">Kosten berechnen</button>
+    <div id="costResult"></div>
+  </section>
+  <footer>Preisquelle: Tankerkönig / Markttransparenzstelle für Kraftstoffe (MTS-K), CC BY 4.0. Geocoding: © OpenStreetMap-Mitwirkende · Routing: OSRM.</footer>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let routeKm = null, startCoords = null, destinationCoords = null, routeCoordinates = [];
+const savedPriceLocation = localStorage.getItem("priceLocation");
+$("priceLocation").value = ["start", "destination", "route"].includes(savedPriceLocation) ? savedPriceLocation : "destination";
+$("priceLocation").addEventListener("change", () => localStorage.setItem("priceLocation", $("priceLocation").value));
+$("vehicle").addEventListener("change", () => {
+  if ($("vehicle").value !== "custom") $("consumption").value = $("vehicle").value;
+});
+async function geocode(q) {
+  const r = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(q));
+  if (!r.ok) throw new Error("Adresssuche fehlgeschlagen.");
+  const d = await r.json(); if (!d.length) throw new Error("Ort nicht gefunden: " + q);
+  return [Number(d[0].lat), Number(d[0].lon)];
+}
+$("routeBtn").onclick = async () => {
+  const btn=$("routeBtn"); btn.disabled=true; $("routeInfo").textContent="Route wird gesucht …";
+  try {
+    const a=await geocode($("start").value), b=await geocode($("destination").value);
+    const url=`https://router.project-osrm.org/route/v1/driving/${a[1]},${a[0]};${b[1]},${b[0]}?overview=full&geometries=geojson`;
+    const r=await fetch(url); const d=await r.json();
+    if (!r.ok || !d.routes?.length) throw new Error("Keine Route gefunden.");
+    routeKm=d.routes[0].distance/1000; $("distance").value=routeKm.toFixed(1);
+    startCoords=a;
+    destinationCoords=b;
+    routeCoordinates=(d.routes[0].geometry?.coordinates || []).map(([lng,lat]) => [lat,lng]);
+    $("routeInfo").textContent=`Route: ${routeKm.toFixed(1)} km · ca. ${Math.round(d.routes[0].duration/60)} Minuten. Tankpreise können am Start, Ziel oder entlang der Route gesucht werden.`;
+  } catch(e){$("routeInfo").innerHTML='<span class="error">'+e.message+'</span>'}
+  finally{btn.disabled=false}
+};
+$("priceBtn").onclick = async () => {
+  const selection = $("priceLocation").value;
+  if (!startCoords || !destinationCoords) {
+    $("priceStatus").textContent = "Bitte zuerst Start und Ziel eingeben und auf „Strecke berechnen“ klicken.";
+    return;
+  }
+
+  let searchPoints = [];
+  if (selection === "start") {
+    searchPoints = [startCoords];
+  } else if (selection === "destination") {
+    searchPoints = [destinationCoords];
+  } else {
+    if (!routeCoordinates.length) {
+      $("priceStatus").textContent = "Für die Suche entlang der Route muss zuerst eine Route berechnet werden.";
+      return;
+    }
+    // Bis zu fünf gleichmäßig verteilte Suchpunkte entlang der berechneten Route.
+    const count = Math.min(5, routeCoordinates.length);
+    searchPoints = Array.from({length: count}, (_, i) => {
+      const index = count === 1 ? 0 : Math.round(i * (routeCoordinates.length - 1) / (count - 1));
+      return routeCoordinates[index];
+    });
+  }
+
+  const btn = $("priceBtn");
+  btn.disabled = true;
+  $("priceStatus").textContent = selection === "route"
+    ? `Tankpreise werden an ${searchPoints.length} Punkten entlang der Route gesucht …`
+    : "Aktuelle Tankpreise werden gesucht …";
+
+  try {
+    const results = await Promise.all(searchPoints.map(async ([lat, lng]) => {
+      const q = new URLSearchParams({lat, lng, fuel:$("fuel").value, radius:$("radius").value});
+      const r = await fetch("/api/fuel?" + q);
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Preisabfrage fehlgeschlagen.");
+      return d;
+    }));
+
+    const stationMap = new Map();
+    for (const result of results) {
+      for (const station of (result.stations || [])) {
+        const key = station.id || `${station.name}|${station.street}|${station.place}`;
+        if (!stationMap.has(key)) stationMap.set(key, station);
+      }
+    }
+    const stations = [...stationMap.values()].filter(s => Number(s.price) > 0);
+    if (!stations.length) throw new Error("Keine aktuellen Preise im gewählten Umkreis gefunden.");
+
+    const average = stations.reduce((sum, s) => sum + Number(s.price), 0) / stations.length;
+    const label = selection === "start" ? "Startort" : selection === "destination" ? "Zielort" : "entlang der Route";
+    $("average").innerHTML = `<div class="result">${average.toFixed(3).replace(".",",")} €/Liter</div><p class="muted">Durchschnitt aus ${stations.length} Tankstellen · Suche ${label}</p>`;
+    $("manualPrice").value = average.toFixed(3);
+    $("stations").innerHTML = "<h3>Tankstellen im Suchgebiet</h3>" + stations
+      .sort((a,b) => Number(a.price) - Number(b.price))
+      .slice(0, 30)
+      .map(s => `<div class="row"><div><strong>${escapeHtml(s.brand || s.name || "Tankstelle")}</strong><br><span class="muted">${escapeHtml([s.street,s.place].filter(Boolean).join(", "))}${s.distance!=null?" · "+s.distance+" km":""}</span></div><div class="price">${Number(s.price).toFixed(3).replace(".",",")} €</div></div>`).join("");
+    $("priceStatus").textContent = `Preise erfolgreich geladen. Suchgebiet: ${label}. Quelle: Tankerkönig / MTS-K.`;
+  } catch(e) {
+    $("priceStatus").innerHTML = '<span class="error">' + escapeHtml(e.message) + '</span>';
+  } finally {
+    btn.disabled = false;
+  }
+};
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+$("calcBtn").onclick=()=>{
+  const km=Number($("distance").value), cons=Number($("consumption").value), price=Number($("manualPrice").value);
+  if(!(km>0&&cons>0&&price>0)){ $("costResult").innerHTML='<p class="error">Bitte Strecke, Verbrauch und einen gültigen Literpreis eingeben.</p>'; return; }
+  const liters=km*cons/100, cost=liters*price;
+  $("costResult").innerHTML=`<p class="result">${cost.toFixed(2).replace(".",",")} €</p><p class="muted">${liters.toFixed(2).replace(".",",")} Liter · ${km.toFixed(1)} km · ${price.toFixed(3).replace(".",",")} €/Liter</p>`;
+};
+if ("serviceWorker" in navigator) window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(console.error));
+</script>
+</body></html>
